@@ -265,6 +265,7 @@ eth_plugin_result_t eth_plugin_call(int method, void *parameter) {
                 }
                 CATCH_OTHER(e) {
                     PRINTF("Plugin call exception for %s\n", alias);
+                    return ETH_PLUGIN_RESULT_ERROR;
                 }
                 FINALLY {
                 }
