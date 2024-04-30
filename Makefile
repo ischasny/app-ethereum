@@ -53,6 +53,7 @@ APP_SOURCE_FILES += $(filter-out ./ethereum-plugin-sdk/src/main.c, $(wildcard ./
 INCLUDES_PATH += ./ethereum-plugin-sdk/src
 APP_SOURCE_FILES += ${BOLOS_SDK}/lib_standard_app/crypto_helpers.c
 APP_SOURCE_FILES += ${BOLOS_SDK}/lib_standard_app/format.c
+APP_SOURCE_FILES += ${BOLOS_SDK}/lib_standard_app/io.c
 INCLUDES_PATH += ${BOLOS_SDK}/lib_standard_app
 
 ifeq ($(TARGET_NAME),TARGET_STAX)

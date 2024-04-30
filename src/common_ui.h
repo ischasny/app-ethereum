@@ -4,6 +4,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+void app_global_init(void);
+
 void ui_idle(void);
 void ui_warning_contract_data(void);
 void ui_display_public_eth2(void);
