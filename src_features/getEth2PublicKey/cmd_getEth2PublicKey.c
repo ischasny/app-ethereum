@@ -49,40 +49,40 @@ void getEth2PublicKey(uint32_t *bip32Path, uint8_t bip32PathLength, uint8_t *out
     memmove(out, publicKey.W + 1, 48);
 }
 
-void handleGetEth2PublicKey(uint8_t p1,
-                            uint8_t p2,
-                            const uint8_t *dataBuffer,
-                            uint8_t dataLength,
-                            unsigned int *flags,
-                            unsigned int *tx) {
+uint32_t handleGetEth2PublicKey(uint8_t p1,
+                                uint8_t p2,
+                                const uint8_t *dataBuffer,
+                                uint8_t dataLength,
+                                unsigned int *flags,
+                                unsigned int *tx) {
     bip32_path_t bip32;
 
     if (!G_called_from_swap) {
         reset_app_context();
     }
     if ((p1 != P1_CONFIRM) && (p1 != P1_NON_CONFIRM)) {
-        THROW(0x6B00);
+        return APDU_RESPONSE_INVALID_P1_P2;
     }
     if (p2 != 0) {
-        THROW(0x6B00);
+        return APDU_RESPONSE_INVALID_P1_P2;
     }
 
     dataBuffer = parseBip32(dataBuffer, &dataLength, &bip32);
 
     if (dataBuffer == NULL) {
-        THROW(0x6a80);
+        return APDU_RESPONSE_INVALID_DATA;
     }
 
     getEth2PublicKey(bip32.path, bip32.length, tmpCtx.publicKeyContext.publicKey.W);
 
     if (p1 == P1_NON_CONFIRM) {
         *tx = set_result_get_eth2_publicKey();
-        THROW(0x9000);
     } else {
         ui_display_public_eth2();
 
         *flags |= IO_ASYNCH_REPLY;
     }
+    return APDU_RESPONSE_OK;
 }
 
 #endif

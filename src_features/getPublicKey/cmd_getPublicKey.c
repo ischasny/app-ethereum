@@ -5,13 +5,14 @@
 #include "common_ui.h"
 #include "os_io_seproxyhal.h"
 #include "crypto_helpers.h"
+#include "ledger_assert.h"
 
-void handleGetPublicKey(uint8_t p1,
-                        uint8_t p2,
-                        const uint8_t *dataBuffer,
-                        uint8_t dataLength,
-                        unsigned int *flags,
-                        unsigned int *tx) {
+uint32_t handleGetPublicKey(uint8_t p1,
+                            uint8_t p2,
+                            const uint8_t *dataBuffer,
+                            uint8_t dataLength,
+                            unsigned int *flags,
+                            unsigned int *tx) {
     bip32_path_t bip32;
 
     if (!G_called_from_swap) {
@@ -20,17 +21,17 @@ void handleGetPublicKey(uint8_t p1,
 
     if ((p1 != P1_CONFIRM) && (p1 != P1_NON_CONFIRM)) {
         PRINTF("Error: Unexpected P1 (%u)!\n", p1);
-        THROW(APDU_RESPONSE_INVALID_P1_P2);
+        return APDU_RESPONSE_INVALID_P1_P2;
     }
     if ((p2 != P2_CHAINCODE) && (p2 != P2_NO_CHAINCODE)) {
         PRINTF("Error: Unexpected P2 (%u)!\n", p2);
-        THROW(APDU_RESPONSE_INVALID_P1_P2);
+        return APDU_RESPONSE_INVALID_P1_P2;
     }
 
     dataBuffer = parseBip32(dataBuffer, &dataLength, &bip32);
 
     if (dataBuffer == NULL) {
-        THROW(APDU_RESPONSE_INVALID_DATA);
+        return APDU_RESPONSE_INVALID_DATA;
     }
 
     tmpCtx.publicKeyContext.getChaincode = (p2 == P2_CHAINCODE);
@@ -41,7 +42,7 @@ void handleGetPublicKey(uint8_t p1,
             tmpCtx.publicKeyContext.publicKey.W,
             (tmpCtx.publicKeyContext.getChaincode ? tmpCtx.publicKeyContext.chainCode : NULL),
             CX_SHA512) != CX_OK) {
-        THROW(APDU_RESPONSE_UNKNOWN);
+        LEDGER_ASSERT(false, "bip32_derive_get_pubkey_256");
     }
     getEthAddressStringFromRawKey(tmpCtx.publicKeyContext.publicKey.W,
                                   tmpCtx.publicKeyContext.address,
@@ -57,12 +58,11 @@ void handleGetPublicKey(uint8_t p1,
     (void) dataBuffer;  // to prevent dead increment warning
     if (dataLength > 0) {
         PRINTF("Error: Leftover unwanted data (%u bytes long)!\n", dataLength);
-        THROW(APDU_RESPONSE_INVALID_DATA);
+        return APDU_RESPONSE_INVALID_DATA;
     }
 
     if (p1 == P1_NON_CONFIRM) {
         *tx = set_result_get_publicKey();
-        THROW(APDU_RESPONSE_OK);
     } else {
         snprintf(strings.common.fullAddress,
                  sizeof(strings.common.fullAddress),
@@ -74,4 +74,5 @@ void handleGetPublicKey(uint8_t p1,
 
         *flags |= IO_ASYNCH_REPLY;
     }
+    return APDU_RESPONSE_OK;
 }

@@ -2,9 +2,9 @@
 #include "apdu_constants.h"
 #include "crypto_helpers.h"
 #include "common_ui.h"
+#include "ledger_assert.h"
 
 unsigned int io_seproxyhal_touch_signMessage_ok(void) {
-    uint32_t tx = 0;
     unsigned int info = 0;
     if (bip32_derive_ecdsa_sign_rs_hash_256(CX_CURVE_256K1,
                                             tmpCtx.messageSigningContext.bip32.path,
@@ -16,7 +16,7 @@ unsigned int io_seproxyhal_touch_signMessage_ok(void) {
                                             G_io_apdu_buffer + 1,
                                             G_io_apdu_buffer + 1 + 32,
                                             &info) != CX_OK) {
-        THROW(APDU_RESPONSE_UNKNOWN);
+        LEDGER_ASSERT(false, "bip32_derive_ecdsa_sign_rs_hash_256");
     }
     G_io_apdu_buffer[0] = 27;
     if (info & CX_ECCINFO_PARITY_ODD) {
@@ -25,24 +25,9 @@ unsigned int io_seproxyhal_touch_signMessage_ok(void) {
     if (info & CX_ECCINFO_xGTn) {
         G_io_apdu_buffer[0] += 2;
     }
-    tx = 65;
-    G_io_apdu_buffer[tx++] = 0x90;
-    G_io_apdu_buffer[tx++] = 0x00;
-    reset_app_context();
-    // Send back the response, do not restart the event loop
-    io_exchange(CHANNEL_APDU | IO_RETURN_AFTER_TX, tx);
-    // Display back the original UX
-    ui_idle();
-    return 0;  // do not redraw the widget
+    return ui_cb_ok(65);
 }
 
 unsigned int io_seproxyhal_touch_signMessage_cancel(void) {
-    reset_app_context();
-    G_io_apdu_buffer[0] = 0x69;
-    G_io_apdu_buffer[1] = 0x85;
-    // Send back the response, do not restart the event loop
-    io_exchange(CHANNEL_APDU | IO_RETURN_AFTER_TX, 2);
-    // Display back the original UX
-    ui_idle();
-    return 0;  // do not redraw the widget
+    return ui_cb_cancel();
 }

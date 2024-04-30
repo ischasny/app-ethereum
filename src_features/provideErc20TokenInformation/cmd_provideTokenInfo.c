@@ -8,15 +8,9 @@
 
 #ifdef HAVE_CONTRACT_NAME_IN_DESCRIPTOR
 
-void handleProvideErc20TokenInformation(uint8_t p1,
-                                        uint8_t p2,
-                                        const uint8_t *workBuffer,
-                                        uint8_t dataLength,
-                                        unsigned int *flags,
-                                        unsigned int *tx) {
-    UNUSED(p1);
-    UNUSED(p2);
-    UNUSED(flags);
+uint32_t handleProvideErc20TokenInformation(const uint8_t *workBuffer,
+                                            uint8_t dataLength,
+                                            unsigned int *tx) {
     uint32_t offset = 0;
     uint8_t tickerLength, contractNameLength;
     uint32_t chainId;
@@ -32,15 +26,15 @@ void handleProvideErc20TokenInformation(uint8_t p1,
         &tmpCtx.transactionContext.tokens[tmpCtx.transactionContext.currentItemIndex];
 
     if (dataLength < 1) {
-        THROW(0x6A80);
+        return APDU_RESPONSE_INVALID_DATA;
     }
     tickerLength = workBuffer[offset++];
     dataLength--;
     if ((tickerLength + 2) >= sizeof(token->ticker)) {  // +2 because ' \0' is appended to ticker
-        THROW(0x6A80);
+        return APDU_RESPONSE_INVALID_DATA;
     }
     if (dataLength < tickerLength + 1) {
-        THROW(0x6A80);
+        return APDU_RESPONSE_INVALID_DATA;
     }
     cx_hash((cx_hash_t *) &sha256, 0, workBuffer + offset, tickerLength, NULL, 0);
     memmove(token->ticker, workBuffer + offset, tickerLength);
@@ -51,7 +45,7 @@ void handleProvideErc20TokenInformation(uint8_t p1,
     contractNameLength = workBuffer[offset++];
     dataLength--;
     if (dataLength < contractNameLength + 20 + 4 + 4) {
-        THROW(0x6A80);
+        return APDU_RESPONSE_INVALID_DATA;
     }
     cx_hash((cx_hash_t *) &sha256,
             CX_LAST,
@@ -75,7 +69,7 @@ void handleProvideErc20TokenInformation(uint8_t p1,
     chainId = U4BE(workBuffer, offset);
     if ((chainConfig->chainId != 0) && (chainConfig->chainId != chainId)) {
         PRINTF("ChainId token mismatch\n");
-        THROW(0x6A80);
+        return APDU_RESPONSE_INVALID_DATA;
     }
     offset += 4;
     dataLength -= 4;
@@ -92,24 +86,18 @@ void handleProvideErc20TokenInformation(uint8_t p1,
                          dataLength)) {
 #ifndef HAVE_BYPASS_SIGNATURES
         PRINTF("Invalid token signature\n");
-        THROW(0x6A80);
+        return APDU_RESPONSE_INVALID_DATA;
 #endif
     }
     tmpCtx.transactionContext.tokenSet[tmpCtx.transactionContext.currentItemIndex] = 1;
-    THROW(0x9000);
+    return APDU_RESPONSE_OK;
 }
 
 #else
 
-void handleProvideErc20TokenInformation(uint8_t p1,
-                                        uint8_t p2,
-                                        const uint8_t *workBuffer,
-                                        uint8_t dataLength,
-                                        unsigned int *flags,
-                                        unsigned int *tx) {
-    UNUSED(p1);
-    UNUSED(p2);
-    UNUSED(flags);
+uint32_t handleProvideErc20TokenInformation(const uint8_t *workBuffer,
+                                            uint8_t dataLength,
+                                            unsigned int *tx) {
     UNUSED(tx);
     uint32_t offset = 0;
     uint8_t tickerLength;
@@ -125,15 +113,15 @@ void handleProvideErc20TokenInformation(uint8_t p1,
     PRINTF("Provisioning currentItemIndex %d\n", tmpCtx.transactionContext.currentItemIndex);
 
     if (dataLength < 1) {
-        THROW(0x6A80);
+        return APDU_RESPONSE_INVALID_DATA;
     }
     tickerLength = workBuffer[offset++];
     dataLength--;
     if ((tickerLength + 1) > sizeof(token->ticker)) {
-        THROW(0x6A80);
+        return APDU_RESPONSE_INVALID_DATA;
     }
     if (dataLength < tickerLength + 20 + 4 + 4) {
-        THROW(0x6A80);
+        return APDU_RESPONSE_INVALID_DATA;
     }
     cx_hash_sha256(workBuffer + offset, tickerLength + 20 + 4 + 4, hash, 32);
     memmove(token->ticker, workBuffer + offset, tickerLength);
@@ -150,7 +138,7 @@ void handleProvideErc20TokenInformation(uint8_t p1,
     chain_id = U4BE(workBuffer, offset);
     if (!app_compatible_with_chain_id(&chain_id)) {
         UNSUPPORTED_CHAIN_ID_MSG(chain_id);
-        THROW(0x6A80);
+        return APDU_RESPONSE_INVALID_DATA;
     }
     offset += 4;
     dataLength -= 4;
@@ -178,13 +166,13 @@ void handleProvideErc20TokenInformation(uint8_t p1,
         if (!cx_ecdsa_verify_no_throw(&tokenKey, hash, 32, workBuffer + offset, dataLength)) {
 #ifndef HAVE_BYPASS_SIGNATURES
             PRINTF("Invalid token signature\n");
-            THROW(0x6A80);
+            return APDU_RESPONSE_INVALID_DATA;
 #endif
         }
     }
 
     tmpCtx.transactionContext.tokenSet[tmpCtx.transactionContext.currentItemIndex] = 1;
-    THROW(0x9000);
+    return APDU_RESPONSE_OK;
 }
 
 #endif

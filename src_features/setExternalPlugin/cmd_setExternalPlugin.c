@@ -7,15 +7,7 @@
 #include "common_ui.h"
 #include "os_io_seproxyhal.h"
 
-void handleSetExternalPlugin(uint8_t p1,
-                             uint8_t p2,
-                             const uint8_t *workBuffer,
-                             uint8_t dataLength,
-                             unsigned int *flags,
-                             unsigned int *tx) {
-    UNUSED(p1);
-    UNUSED(p2);
-    UNUSED(flags);
+uint32_t handleSetExternalPlugin(const uint8_t *workBuffer, uint8_t dataLength) {
     PRINTF("Handling set Plugin\n");
     uint8_t hash[INT256_LENGTH];
     cx_ecfp_public_key_t tokenKey;
@@ -25,14 +17,14 @@ void handleSetExternalPlugin(uint8_t p1,
 
     if (dataLength <= payload_size) {
         PRINTF("data too small: expected at least %d got %d\n", payload_size, dataLength);
-        THROW(0x6A80);
+        return APDU_RESPONSE_INVALID_DATA;
     }
 
     if (pluginNameLength + 1 > sizeof(dataContext.tokenContext.pluginName)) {
         PRINTF("name length too big: expected max %d, got %d\n",
                sizeof(dataContext.tokenContext.pluginName),
                pluginNameLength + 1);
-        THROW(0x6A80);
+        return APDU_RESPONSE_INVALID_DATA;
     }
 
     // check Ledger's signature over the payload
@@ -50,7 +42,7 @@ void handleSetExternalPlugin(uint8_t p1,
         PRINTF("Invalid plugin signature %.*H\n",
                dataLength - payload_size,
                workBuffer + payload_size);
-        THROW(0x6A80);
+        return APDU_RESPONSE_INVALID_DATA;
 #endif
     }
 
@@ -75,7 +67,7 @@ void handleSetExternalPlugin(uint8_t p1,
             memset(dataContext.tokenContext.pluginName,
                    0,
                    sizeof(dataContext.tokenContext.pluginName));
-            THROW(0x6984);
+            return APDU_RESPONSE_PLUGIN_NOT_INSTALLED;
         }
         FINALLY {
         }
@@ -90,6 +82,5 @@ void handleSetExternalPlugin(uint8_t p1,
 
     pluginType = EXTERNAL;
 
-    G_io_apdu_buffer[(*tx)++] = 0x90;
-    G_io_apdu_buffer[(*tx)++] = 0x00;
+    return APDU_RESPONSE_OK;
 }

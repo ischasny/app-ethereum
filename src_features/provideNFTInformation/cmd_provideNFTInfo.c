@@ -38,23 +38,14 @@ typedef bool verificationAlgo(const cx_ecfp_public_key_t *,
                               unsigned char *,
                               unsigned int);
 
-void handleProvideNFTInformation(uint8_t p1,
-                                 uint8_t p2,
-                                 const uint8_t *workBuffer,
-                                 uint8_t dataLength,
-                                 unsigned int *flags,
-                                 unsigned int *tx) {
-    UNUSED(p1);
-    UNUSED(p2);
-    UNUSED(tx);
-    UNUSED(flags);
+uint32_t handleProvideNFTInformation(const uint8_t *workBuffer, uint8_t dataLength) {
     uint8_t hash[INT256_LENGTH];
     cx_ecfp_public_key_t nftKey;
     PRINTF("In handle provide NFTInformation\n");
 
     if ((pluginType != ERC721) && (pluginType != ERC1155)) {
         PRINTF("NFT metadata provided without proper plugin loaded!\n");
-        THROW(0x6985);
+        return APDU_RESPONSE_CONDITION_NOT_SATISFIED;
     }
     tmpCtx.transactionContext.currentItemIndex =
         (tmpCtx.transactionContext.currentItemIndex + 1) % MAX_ITEMS;
@@ -69,28 +60,20 @@ void handleProvideNFTInformation(uint8_t p1,
         PRINTF("Data too small for headers: expected at least %d, got %d\n",
                HEADER_SIZE,
                dataLength);
-        THROW(APDU_RESPONSE_INVALID_DATA);
+        return APDU_RESPONSE_INVALID_DATA;
     }
 
     uint8_t type = workBuffer[offset];
-    switch (type) {
-        case TYPE_1:
-            break;
-        default:
-            PRINTF("Unsupported type %d\n", type);
-            THROW(APDU_RESPONSE_INVALID_DATA);
-            break;
+    if (type != TYPE_1) {
+        PRINTF("Unsupported type %d\n", type);
+        return APDU_RESPONSE_INVALID_DATA;
     }
     offset += TYPE_SIZE;
 
     uint8_t version = workBuffer[offset];
-    switch (version) {
-        case VERSION_1:
-            break;
-        default:
-            PRINTF("Unsupported version %d\n", version);
-            THROW(APDU_RESPONSE_INVALID_DATA);
-            break;
+    if (version != VERSION_1) {
+        PRINTF("Unsupported version %d\n", version);
+        return APDU_RESPONSE_INVALID_DATA;
     }
     offset += VERSION_SIZE;
 
@@ -104,14 +87,14 @@ void handleProvideNFTInformation(uint8_t p1,
         PRINTF("Data too small for payload: expected at least %d, got %d\n",
                payloadSize,
                dataLength);
-        THROW(APDU_RESPONSE_INVALID_DATA);
+        return APDU_RESPONSE_INVALID_DATA;
     }
 
     if (collectionNameLength > COLLECTION_NAME_MAX_LEN) {
         PRINTF("CollectionName too big: expected max %d, got %d\n",
                COLLECTION_NAME_MAX_LEN,
                collectionNameLength);
-        THROW(APDU_RESPONSE_INVALID_DATA);
+        return APDU_RESPONSE_INVALID_DATA;
     }
 
     // Safe because we've checked the size before.
@@ -132,7 +115,7 @@ void handleProvideNFTInformation(uint8_t p1,
     PRINTF("ChainID: %.*H\n", sizeof(chain_id), (workBuffer + offset));
     if (!app_compatible_with_chain_id(&chain_id)) {
         UNSUPPORTED_CHAIN_ID_MSG(chain_id);
-        THROW(APDU_RESPONSE_INVALID_DATA);
+        return APDU_RESPONSE_INVALID_DATA;
     }
     offset += CHAIN_ID_SIZE;
 
@@ -151,8 +134,7 @@ void handleProvideNFTInformation(uint8_t p1,
             break;
         default:
             PRINTF("KeyID %d not supported\n", keyId);
-            THROW(APDU_RESPONSE_INVALID_DATA);
-            break;
+            return APDU_RESPONSE_INVALID_DATA;
     }
     PRINTF("RawKey: %.*H\n", rawKeyLen, rawKey);
     offset += KEY_ID_SIZE;
@@ -162,7 +144,7 @@ void handleProvideNFTInformation(uint8_t p1,
 
     if (algorithmId != ALGORITHM_ID_1) {
         PRINTF("Incorrect algorithmId %d\n", algorithmId);
-        THROW(APDU_RESPONSE_INVALID_DATA);
+        return APDU_RESPONSE_INVALID_DATA;
     }
     offset += ALGORITHM_ID_SIZE;
     PRINTF("hashing: %.*H\n", payloadSize, workBuffer);
@@ -170,7 +152,7 @@ void handleProvideNFTInformation(uint8_t p1,
 
     if (dataLength < payloadSize + SIGNATURE_LENGTH_SIZE) {
         PRINTF("Data too short to hold signature length\n");
-        THROW(APDU_RESPONSE_INVALID_DATA);
+        return APDU_RESPONSE_INVALID_DATA;
     }
 
     uint8_t signatureLen = workBuffer[offset];
@@ -180,13 +162,13 @@ void handleProvideNFTInformation(uint8_t p1,
                MIN_DER_SIG_SIZE,
                MAX_DER_SIG_SIZE,
                signatureLen);
-        THROW(APDU_RESPONSE_INVALID_DATA);
+        return APDU_RESPONSE_INVALID_DATA;
     }
     offset += SIGNATURE_LENGTH_SIZE;
 
     if (dataLength < payloadSize + SIGNATURE_LENGTH_SIZE + signatureLen) {
         PRINTF("Signature could not fit in data\n");
-        THROW(APDU_RESPONSE_INVALID_DATA);
+        return APDU_RESPONSE_INVALID_DATA;
     }
 
     CX_ASSERT(cx_ecfp_init_public_key_no_throw(CX_CURVE_256K1, rawKey, rawKeyLen, &nftKey));
@@ -197,12 +179,12 @@ void handleProvideNFTInformation(uint8_t p1,
                                   signatureLen)) {
 #ifndef HAVE_BYPASS_SIGNATURES
         PRINTF("Invalid NFT signature\n");
-        THROW(APDU_RESPONSE_INVALID_DATA);
+        return APDU_RESPONSE_INVALID_DATA;
 #endif
     }
 
     tmpCtx.transactionContext.tokenSet[tmpCtx.transactionContext.currentItemIndex] = 1;
-    THROW(0x9000);
+    return APDU_RESPONSE_OK;
 }
 
 #endif  // HAVE_NFT_SUPPORT

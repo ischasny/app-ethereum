@@ -10,6 +10,7 @@
 #include "apdu_constants.h"
 #include "crypto_helpers.h"
 #include "format.h"
+#include "ledger_assert.h"
 
 #define ERR_SILENT_MODE_CHECK_FAILED 0x6001
 
@@ -176,14 +177,8 @@ customStatus_e customProcessor(txContext_t *context) {
     return CUSTOM_NOT_HANDLED;
 }
 
-void reportFinalizeError(bool direct) {
-    reset_app_context();
-    if (direct) {
-        THROW(0x6A80);
-    } else {
-        io_seproxyhal_send_status(0x6A80);
-        ui_idle();
-    }
+void reportFinalizeError() {
+    io_seproxyhal_send_status(APDU_RESPONSE_INVALID_DATA, true);
 }
 
 static void address_to_string(uint8_t *in,
@@ -192,9 +187,7 @@ static void address_to_string(uint8_t *in,
                               size_t out_len,
                               uint64_t chainId) {
     if (in_len != 0) {
-        if (!getEthDisplayableAddress(in, out, out_len, chainId)) {
-            THROW(APDU_RESPONSE_ERROR_NO_INFO);
-        }
+        getEthDisplayableAddress(in, out, out_len, chainId);
     } else {
         strlcpy(out, "Contract", out_len);
     }
@@ -274,9 +267,7 @@ static void get_network_as_string(char *out, size_t out_size) {
 
     if (name == NULL) {
         // No network name found so simply copy the chain ID as the network name.
-        if (!u64_to_string(chain_id, out, out_size)) {
-            THROW(0x6502);
-        }
+        u64_to_string(chain_id, out, out_size);
     } else {
         // Network name found, simply copy it.
         strlcpy(out, name, out_size);
@@ -295,7 +286,7 @@ static void get_public_key(uint8_t *out, uint8_t outLength) {
                                     raw_pubkey,
                                     NULL,
                                     CX_SHA512) != CX_OK) {
-        THROW(APDU_RESPONSE_UNKNOWN);
+        LEDGER_ASSERT(false, "bip32_derive_get_pubkey_256");
     }
 
     getEthAddressFromRawKey(raw_pubkey, out);
@@ -316,7 +307,7 @@ static int strcasecmp_workaround(const char *str1, const char *str2) {
     return 0;
 }
 
-__attribute__((noinline)) static bool finalize_parsing_helper(bool direct, bool *use_standard_UI) {
+__attribute__((noinline)) static bool finalize_parsing_helper(bool *use_standard_UI) {
     char displayBuffer[50];
     uint8_t decimals = WEI_TO_ETHER;
     uint64_t chain_id = get_tx_chain_id();
@@ -331,10 +322,8 @@ __attribute__((noinline)) static bool finalize_parsing_helper(bool direct, bool 
         if (chainConfig->chainId != id) {
             PRINTF("Invalid chainID %u expected %u\n", id, chainConfig->chainId);
             reset_app_context();
-            reportFinalizeError(direct);
-            if (!direct) {
-                return false;
-            }
+            reportFinalizeError();
+            return false;
         }
     }
     // Store the hash
@@ -355,10 +344,8 @@ __attribute__((noinline)) static bool finalize_parsing_helper(bool direct, bool 
 
         if (!eth_plugin_call(ETH_PLUGIN_FINALIZE, (void *) &pluginFinalize)) {
             PRINTF("Plugin finalize call failed\n");
-            reportFinalizeError(direct);
-            if (!direct) {
-                return false;
-            }
+            reportFinalizeError();
+            return false;
         }
         // Lookup tokens if requested
         ethPluginProvideInfo_t pluginProvideInfo;
@@ -381,10 +368,8 @@ __attribute__((noinline)) static bool finalize_parsing_helper(bool direct, bool 
             if (eth_plugin_call(ETH_PLUGIN_PROVIDE_INFO, (void *) &pluginProvideInfo) <=
                 ETH_PLUGIN_RESULT_UNSUCCESSFUL) {
                 PRINTF("Plugin provide token call failed\n");
-                reportFinalizeError(direct);
-                if (!direct) {
-                    return false;
-                }
+                reportFinalizeError();
+                return false;
             }
             pluginFinalize.result = pluginProvideInfo.result;
         }
@@ -406,10 +391,8 @@ __attribute__((noinline)) static bool finalize_parsing_helper(bool direct, bool 
                     tmpContent.txContent.dataPresent = false;
                     if ((pluginFinalize.amount == NULL) || (pluginFinalize.address == NULL)) {
                         PRINTF("Incorrect amount/address set by plugin\n");
-                        reportFinalizeError(direct);
-                        if (!direct) {
-                            return false;
-                        }
+                        reportFinalizeError();
+                        return false;
                     }
                     memmove(tmpContent.txContent.value.value, pluginFinalize.amount, 32);
                     tmpContent.txContent.value.length = 32;
@@ -422,10 +405,8 @@ __attribute__((noinline)) static bool finalize_parsing_helper(bool direct, bool 
                     break;
                 default:
                     PRINTF("ui type %d not supported\n", pluginFinalize.uiType);
-                    reportFinalizeError(direct);
-                    if (!direct) {
-                        return false;
-                    }
+                    reportFinalizeError();
+                    return false;
             }
         }
     }
@@ -442,15 +423,13 @@ __attribute__((noinline)) static bool finalize_parsing_helper(bool direct, bool 
     // User has just validated a swap but ETH received apdus about a non standard plugin / contract
     if (G_called_from_swap && !*use_standard_UI) {
         PRINTF("ERR_SILENT_MODE_CHECK_FAILED, G_called_from_swap\n");
-        THROW(ERR_SILENT_MODE_CHECK_FAILED);
+        return false;
     }
 
     if (tmpContent.txContent.dataPresent && !N_storage.dataAllowed) {
-        reportFinalizeError(direct);
+        reportFinalizeError();
         ui_warning_contract_data();
-        if (!direct) {
-            return false;
-        }
+        return false;
     }
 
     // Prepare destination address and amount to display
@@ -466,7 +445,7 @@ __attribute__((noinline)) static bool finalize_parsing_helper(bool direct, bool 
             // Ensure the values are the same that the ones that have been previously validated
             if (strcasecmp_workaround(strings.common.fullAddress, displayBuffer) != 0) {
                 PRINTF("ERR_SILENT_MODE_CHECK_FAILED, address check failed\n");
-                THROW(ERR_SILENT_MODE_CHECK_FAILED);
+                return false;
             }
         } else {
             strlcpy(strings.common.fullAddress, displayBuffer, sizeof(strings.common.fullAddress));
@@ -482,7 +461,7 @@ __attribute__((noinline)) static bool finalize_parsing_helper(bool direct, bool 
                             displayBuffer,
                             sizeof(displayBuffer))) {
             PRINTF("OVERFLOW, amount to string failed\n");
-            THROW(EXCEPTION_OVERFLOW);
+            return false;
         }
 
         if (G_called_from_swap) {
@@ -491,7 +470,7 @@ __attribute__((noinline)) static bool finalize_parsing_helper(bool direct, bool 
                 PRINTF("ERR_SILENT_MODE_CHECK_FAILED, amount check failed\n");
                 PRINTF("Expected %s\n", strings.common.fullAmount);
                 PRINTF("Received %s\n", displayBuffer);
-                THROW(ERR_SILENT_MODE_CHECK_FAILED);
+                return false;
             }
         } else {
             strlcpy(strings.common.fullAmount, displayBuffer, sizeof(strings.common.fullAmount));
@@ -511,7 +490,7 @@ __attribute__((noinline)) static bool finalize_parsing_helper(bool direct, bool 
             PRINTF("ERR_SILENT_MODE_CHECK_FAILED, fees check failed\n");
             PRINTF("Expected %s\n", strings.common.maxFee);
             PRINTF("Received %s\n", displayBuffer);
-            THROW(ERR_SILENT_MODE_CHECK_FAILED);
+            return false;
         }
     } else {
         strlcpy(strings.common.maxFee, displayBuffer, sizeof(strings.common.maxFee));
@@ -533,10 +512,10 @@ end:
     return false;
 }
 
-void finalizeParsing(bool direct) {
+void finalizeParsing() {
     bool use_standard_UI = true;
 
-    if (!finalize_parsing_helper(direct, &use_standard_UI)) {
+    if (!finalize_parsing_helper(&use_standard_UI)) {
         return;
     }
     // If called from swap, the user has already validated a standard transaction
