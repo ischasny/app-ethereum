@@ -143,4 +143,3 @@ parserStatus_e processTx(txContext_t *context,
                          uint32_t processingFlags);
 parserStatus_e continueTx(txContext_t *context);
 void copyTxData(txContext_t *context, uint8_t *out, uint32_t length);
-uint8_t readTxByte(txContext_t *context);
