@@ -8,8 +8,9 @@
 typedef int bagl_element_t;
 #endif
 
-unsigned int io_seproxyhal_touch_settings(const bagl_element_t *e);
-unsigned int io_seproxyhal_touch_exit(const bagl_element_t *e);
+unsigned int ui_cb_ok(uint32_t tx);
+unsigned int ui_cb_cancel();
+
 unsigned int io_seproxyhal_touch_tx_ok(const bagl_element_t *e);
 unsigned int io_seproxyhal_touch_tx_cancel(const bagl_element_t *e);
 unsigned int io_seproxyhal_touch_address_ok(const bagl_element_t *e);
@@ -24,8 +25,8 @@ unsigned int io_seproxyhal_touch_privacy_cancel(const bagl_element_t *e);
 
 void ui_warning_contract_data(void);
 
-void io_seproxyhal_send_status(uint32_t sw);
-void finalizeParsing(bool direct);
+void io_seproxyhal_send_status(uint32_t sw, bool idle);
+void finalizeParsing();
 extraInfo_t *getKnownToken(const uint8_t *contractAddress);
 
 #endif  // _UI_CALLBACKS_H_
