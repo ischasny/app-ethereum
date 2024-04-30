@@ -22,15 +22,14 @@ static s_field_hashing *fh = NULL;
  *
  * @return whether the initialization was successful or not
  */
-bool field_hash_init(void) {
+uint32_t field_hash_init(void) {
     if (fh == NULL) {
         if ((fh = MEM_ALLOC_AND_ALIGN_TYPE(*fh)) == NULL) {
-            apdu_response_code = APDU_RESPONSE_INSUFFICIENT_MEMORY;
-            return false;
+            return APDU_RESPONSE_INSUFFICIENT_MEMORY;
         }
         fh->state = FHS_IDLE;
     }
-    return true;
+    return APDU_RESPONSE_OK;
 }
 
 /**
@@ -50,7 +49,8 @@ void field_hash_deinit(void) {
  */
 static const uint8_t *field_hash_prepare(const void *const field_ptr,
                                          const uint8_t *data,
-                                         uint8_t *data_length) {
+                                         uint8_t *data_length,
+                                         uint32_t *sw) {
     e_type field_type;
     cx_err_t error = CX_INTERNAL_ERROR;
 
@@ -61,7 +61,7 @@ static const uint8_t *field_hash_prepare(const void *const field_ptr,
     fh->state = FHS_WAITING_FOR_MORE;
     if (IS_DYN(field_type)) {
         CX_CHECK(cx_keccak_init_no_throw(&global_sha3, 256));
-        ui_712_new_field(field_ptr, data, *data_length);
+        *sw = ui_712_new_field(field_ptr, data, *data_length);
     }
     return data;
 end:
@@ -81,6 +81,7 @@ end:
 static const uint8_t *field_hash_finalize_static(const void *const field_ptr,
                                                  const uint8_t *const data,
                                                  uint8_t data_length) {
+    uint32_t sw = APDU_RESPONSE_UNKNOWN;
     uint8_t *value = NULL;
     e_type field_type;
 
@@ -103,14 +104,16 @@ static const uint8_t *field_hash_finalize_static(const void *const field_ptr,
             break;
         case TYPE_CUSTOM:
         default:
-            apdu_response_code = APDU_RESPONSE_INVALID_DATA;
             PRINTF("Unknown solidity type!\n");
     }
 
     if (value == NULL) {
         return NULL;
     }
-    ui_712_new_field(field_ptr, data, data_length);
+    sw = ui_712_new_field(field_ptr, data, data_length);
+    if (sw != APDU_RESPONSE_OK) {
+        return NULL;
+    }
     return value;
 }
 
@@ -126,7 +129,6 @@ static uint8_t *field_hash_finalize_dynamic(void) {
     cx_err_t error = CX_INTERNAL_ERROR;
 
     if ((value = mem_alloc(KECCAK256_HASH_BYTESIZE)) == NULL) {
-        apdu_response_code = APDU_RESPONSE_INSUFFICIENT_MEMORY;
         return NULL;
     }
     // copy hash into memory
@@ -175,25 +177,27 @@ static void field_hash_feed_parent(e_type field_type, const uint8_t *const hash)
  * @param[in] data_length the value length
  * @return whether an error occurred or not
  */
-static bool field_hash_domain_special_fields(const void *const field_ptr,
-                                             const uint8_t *const data,
-                                             uint8_t data_length) {
+static uint32_t field_hash_domain_special_fields(const void *const field_ptr,
+                                                 const uint8_t *const data,
+                                                 uint8_t data_length) {
     const char *key;
     uint8_t keylen;
 
     key = get_struct_field_keyname(field_ptr, &keylen);
+    if (!key) {
+        return APDU_RESPONSE_CONDITION_NOT_SATISFIED;
+    }
     // copy contract address into context
     if (strncmp(key, "verifyingContract", keylen) == 0) {
         if (data_length != sizeof(eip712_context->contract_addr)) {
-            apdu_response_code = APDU_RESPONSE_INVALID_DATA;
             PRINTF("Unexpected verifyingContract length!\n");
-            return false;
+            return APDU_RESPONSE_INVALID_DATA;
         }
         memcpy(eip712_context->contract_addr, data, data_length);
     } else if (strncmp(key, "chainId", keylen) == 0) {
         eip712_context->chain_id = u64_from_BE(data, data_length);
     }
-    return true;
+    return APDU_RESPONSE_OK;
 }
 
 /**
@@ -204,34 +208,36 @@ static bool field_hash_domain_special_fields(const void *const field_ptr,
  * @param[in] data_length the value length
  * @return whether an error occurred or not
  */
-static bool field_hash_finalize(const void *const field_ptr,
-                                const uint8_t *const data,
-                                uint8_t data_length) {
+static uint32_t field_hash_finalize(const void *const field_ptr,
+                                    const uint8_t *const data,
+                                    uint8_t data_length) {
+    uint32_t sw = APDU_RESPONSE_UNKNOWN;
     const uint8_t *value = NULL;
     e_type field_type;
 
     field_type = struct_field_type(field_ptr);
     if (!IS_DYN(field_type)) {
         if ((value = field_hash_finalize_static(field_ptr, data, data_length)) == NULL) {
-            return false;
+            return APDU_RESPONSE_INVALID_DATA;
         }
     } else {
         if ((value = field_hash_finalize_dynamic()) == NULL) {
-            return false;
+            return APDU_RESPONSE_INSUFFICIENT_MEMORY;
         }
     }
 
     field_hash_feed_parent(field_type, value);
 
     if (path_get_root_type() == ROOT_DOMAIN) {
-        if (field_hash_domain_special_fields(field_ptr, data, data_length) == false) {
-            return false;
+        sw = field_hash_domain_special_fields(field_ptr, data, data_length);
+        if (sw != APDU_RESPONSE_OK) {
+            return sw;
         }
     }
     path_advance();
     fh->state = FHS_IDLE;
     ui_712_finalize_field();
-    return true;
+    return APDU_RESPONSE_OK;
 }
 
 /**
@@ -242,28 +248,29 @@ static bool field_hash_finalize(const void *const field_ptr,
  * @param[in] partial whether there is more of that data coming later or not
  * @return whether the data hashing was successful or not
  */
-bool field_hash(const uint8_t *data, uint8_t data_length, bool partial) {
+uint32_t field_hash(const uint8_t *data, uint8_t data_length, bool partial) {
+    uint32_t sw = APDU_RESPONSE_UNKNOWN;
     const void *field_ptr;
     e_type field_type;
 
     if ((fh == NULL) || ((field_ptr = path_get_field()) == NULL)) {
-        apdu_response_code = APDU_RESPONSE_CONDITION_NOT_SATISFIED;
-        return false;
+        return APDU_RESPONSE_CONDITION_NOT_SATISFIED;
     }
 
     field_type = struct_field_type(field_ptr);
     if (fh->state == FHS_IDLE)  // first packet for this frame
     {
         if (data_length < 2) {
-            apdu_response_code = APDU_RESPONSE_INVALID_DATA;
-            return false;
+            return APDU_RESPONSE_INVALID_DATA;
         }
 
-        data = field_hash_prepare(field_ptr, data, &data_length);
+        data = field_hash_prepare(field_ptr, data, &data_length, &sw);
+        if (sw != APDU_RESPONSE_OK) {
+            return sw;
+        }
     }
     if (data_length > fh->remaining_size) {
-        apdu_response_code = APDU_RESPONSE_INVALID_DATA;
-        return false;
+        return APDU_RESPONSE_INVALID_DATA;
     }
     fh->remaining_size -= data_length;
     // if a dynamic type -> continue progressive hash
@@ -273,22 +280,20 @@ bool field_hash(const uint8_t *data, uint8_t data_length, bool partial) {
     if (fh->remaining_size == 0) {
         if (partial)  // only makes sense if marked as complete
         {
-            apdu_response_code = APDU_RESPONSE_INVALID_DATA;
-            return false;
+            return APDU_RESPONSE_INVALID_DATA;
         }
-        if (field_hash_finalize(field_ptr, data, data_length) == false) {
-            return false;
+        sw = field_hash_finalize(field_ptr, data, data_length);
+        if (sw != APDU_RESPONSE_OK) {
+            return sw;
         }
     } else {
         if (!partial || !IS_DYN(field_type))  // only makes sense if marked as partial
         {
-            apdu_response_code = APDU_RESPONSE_INVALID_DATA;
-            return false;
+            return APDU_RESPONSE_INVALID_DATA;
         }
-        handle_eip712_return_code(true);
     }
 
-    return true;
+    return APDU_RESPONSE_OK;
 }
 
 #endif  // HAVE_EIP712_FULL_SUPPORT

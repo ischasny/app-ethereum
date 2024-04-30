@@ -6,6 +6,7 @@
 #include "common_712.h"
 #include "ui_callbacks.h"
 #include "common_ui.h"
+#include "ledger_assert.h"
 
 static const uint8_t EIP_712_MAGIC[] = {0x19, 0x01};
 
@@ -47,7 +48,7 @@ unsigned int ui_712_approve_cb(void) {
                                             G_io_apdu_buffer + 1,
                                             G_io_apdu_buffer + 1 + 32,
                                             &info) != CX_OK) {
-        THROW(APDU_RESPONSE_UNKNOWN);
+        LEDGER_ASSERT(false, "bip32_derive_ecdsa_sign_rs_hash_256");
     }
     G_io_apdu_buffer[0] = 27;
     if (info & CX_ECCINFO_PARITY_ODD) {
@@ -57,8 +58,8 @@ unsigned int ui_712_approve_cb(void) {
         G_io_apdu_buffer[0] += 2;
     }
     tx = 65;
-    G_io_apdu_buffer[tx++] = 0x90;
-    G_io_apdu_buffer[tx++] = 0x00;
+    U2BE_ENCODE(G_io_apdu_buffer, tx, APDU_RESPONSE_OK);
+    tx += 2;
     reset_app_context();
     // Send back the response, do not restart the event loop
     io_exchange(CHANNEL_APDU | IO_RETURN_AFTER_TX, tx);
@@ -68,12 +69,6 @@ unsigned int ui_712_approve_cb(void) {
 }
 
 unsigned int ui_712_reject_cb(void) {
-    reset_app_context();
-    G_io_apdu_buffer[0] = 0x69;
-    G_io_apdu_buffer[1] = 0x85;
-    // Send back the response, do not restart the event loop
-    io_exchange(CHANNEL_APDU | IO_RETURN_AFTER_TX, 2);
-    // Display back the original UX
-    ui_idle();
+    io_seproxyhal_send_status(APDU_RESPONSE_CONDITION_NOT_SATISFIED, true);
     return 0;  // do not redraw the widget
 }

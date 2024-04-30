@@ -11,7 +11,9 @@
 
 typedef enum { FILTERING_PROVIDE_MESSAGE_INFO, FILTERING_SHOW_FIELD } e_filtering_type;
 
-bool provide_filtering_info(const uint8_t *const payload, uint8_t length, e_filtering_type type);
+uint32_t provide_filtering_info(const uint8_t *const payload,
+                                uint8_t length,
+                                e_filtering_type type);
 
 #endif  // HAVE_EIP712_FULL_SUPPORT
 

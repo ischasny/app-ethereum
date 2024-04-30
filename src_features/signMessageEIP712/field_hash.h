@@ -15,9 +15,9 @@ typedef struct {
     uint8_t state;  // e_field_hashing_state
 } s_field_hashing;
 
-bool field_hash_init(void);
+uint32_t field_hash_init(void);
 void field_hash_deinit(void);
-bool field_hash(const uint8_t *data, uint8_t data_length, bool partial);
+uint32_t field_hash(const uint8_t *data, uint8_t data_length, bool partial);
 
 #endif  // HAVE_EIP712_FULL_SUPPORT
 

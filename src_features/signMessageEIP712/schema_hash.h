@@ -4,8 +4,9 @@
 #ifdef HAVE_EIP712_FULL_SUPPORT
 
 #include <stdbool.h>
+#include <stdint.h>
 
-bool compute_schema_hash(void);
+uint32_t compute_schema_hash(void);
 
 #endif  // HAVE_EIP712_FULL_SUPPORT
 

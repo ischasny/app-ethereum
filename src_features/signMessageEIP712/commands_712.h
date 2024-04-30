@@ -22,11 +22,10 @@
 
 #define DOMAIN_STRUCT_NAME "EIP712Domain"
 
-bool handle_eip712_struct_def(const uint8_t *const apdu_buf);
-bool handle_eip712_struct_impl(const uint8_t *const apdu_buf);
-bool handle_eip712_sign(const uint8_t *const apdu_buf);
-bool handle_eip712_filtering(const uint8_t *const apdu_buf);
-void handle_eip712_return_code(bool success);
+uint32_t handle_eip712_struct_def(const uint8_t *const apdu_buf);
+uint32_t handle_eip712_struct_impl(const uint8_t *const apdu_buf);
+uint32_t handle_eip712_sign(const uint8_t *const apdu_buf);
+uint32_t handle_eip712_filtering(const uint8_t *const apdu_buf);
 
 #endif  // HAVE_EIP712_FULL_SUPPORT
 

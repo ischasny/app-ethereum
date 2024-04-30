@@ -25,12 +25,12 @@ typedef struct {
     uint8_t structs_to_review;
 } t_ui_context;
 
-bool ui_712_init(void);
+uint32_t ui_712_init(void);
 void ui_712_deinit(void);
 e_eip712_nfs ui_712_next_field(void);
 void ui_712_review_struct(const void *const struct_ptr);
-bool ui_712_new_field(const void *const field_ptr, const uint8_t *const data, uint8_t length);
-void ui_712_end_sign(void);
+uint32_t ui_712_new_field(const void *const field_ptr, const uint8_t *const data, uint8_t length);
+uint32_t ui_712_end_sign(void);
 unsigned int ui_712_approve();
 unsigned int ui_712_reject();
 void ui_712_set_title(const char *const str, uint8_t length);

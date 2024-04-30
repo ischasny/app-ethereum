@@ -123,15 +123,12 @@ void ui_712_redraw_generic_step(void) {
 e_eip712_nfs ui_712_next_field(void) {
     e_eip712_nfs state = EIP712_NO_MORE_FIELD;
 
-    if (ui_ctx == NULL) {
-        apdu_response_code = APDU_RESPONSE_CONDITION_NOT_SATISFIED;
-    } else {
+    if (ui_ctx) {
         if (ui_ctx->structs_to_review > 0) {
             ui_712_review_struct(path_get_nth_field_to_last(ui_ctx->structs_to_review));
             ui_ctx->structs_to_review -= 1;
             state = EIP712_FIELD_LATER;
         } else if (!ui_ctx->end_reached) {
-            handle_eip712_return_code(true);
             state = EIP712_FIELD_INCOMING;
         }
     }
@@ -232,10 +229,9 @@ static const char *get_address_substitute(const uint8_t *addr) {
  * @param[in] length its length
  * @return if the formatting was successful
  */
-static bool ui_712_format_addr(const uint8_t *const data, uint8_t length) {
+static uint32_t ui_712_format_addr(const uint8_t *const data, uint8_t length) {
     if (length != ADDRESS_LENGTH) {
-        apdu_response_code = APDU_RESPONSE_INVALID_DATA;
-        return false;
+        return APDU_RESPONSE_INVALID_DATA;
     }
 
     if (ui_712_field_shown()) {
@@ -248,11 +244,11 @@ static bool ui_712_format_addr(const uint8_t *const data, uint8_t length) {
                                           strings.tmp.tmp,
                                           sizeof(strings.tmp.tmp),
                                           chainConfig->chainId)) {
-                THROW(APDU_RESPONSE_ERROR_NO_INFO);
+                return APDU_RESPONSE_INVALID_DATA;
             }
         }
     }
-    return true;
+    return APDU_RESPONSE_OK;
 }
 
 /**
@@ -262,20 +258,19 @@ static bool ui_712_format_addr(const uint8_t *const data, uint8_t length) {
  * @param[in] length its length
  * @return if the formatting was successful
  */
-static bool ui_712_format_bool(const uint8_t *const data, uint8_t length) {
+static uint32_t ui_712_format_bool(const uint8_t *const data, uint8_t length) {
     const char *const true_str = "true";
     const char *const false_str = "false";
     const char *str;
 
     if (length != 1) {
-        apdu_response_code = APDU_RESPONSE_INVALID_DATA;
-        return false;
+        return APDU_RESPONSE_INVALID_DATA;
     }
     str = *data ? true_str : false_str;
     if (ui_712_field_shown()) {
         ui_712_set_value(str, strlen(str));
     }
-    return true;
+    return APDU_RESPONSE_OK;
 }
 
 /**
@@ -303,9 +298,9 @@ static void ui_712_format_bytes(const uint8_t *const data, uint8_t length) {
  * @param[in] length its length
  * @return if the formatting was successful
  */
-static bool ui_712_format_int(const uint8_t *const data,
-                              uint8_t length,
-                              const void *const field_ptr) {
+static uint32_t ui_712_format_int(const uint8_t *const data,
+                                  uint8_t length,
+                                  const void *const field_ptr) {
     uint256_t value256;
     uint128_t value128;
     int32_t value32;
@@ -361,10 +356,9 @@ static bool ui_712_format_int(const uint8_t *const data,
             break;
         default:
             PRINTF("Unhandled field typesize\n");
-            apdu_response_code = APDU_RESPONSE_INVALID_DATA;
-            return false;
+            return APDU_RESPONSE_INVALID_DATA;
     }
-    return true;
+    return APDU_RESPONSE_OK;
 }
 
 /**
@@ -389,19 +383,18 @@ static void ui_712_format_uint(const uint8_t *const data, uint8_t length) {
  * @param[in] data pointer to the field's raw value
  * @param[in] length field's raw value byte-length
  */
-bool ui_712_new_field(const void *const field_ptr, const uint8_t *const data, uint8_t length) {
+uint32_t ui_712_new_field(const void *const field_ptr, const uint8_t *const data, uint8_t length) {
     const char *key;
     uint8_t key_len;
+    uint32_t sw = APDU_RESPONSE_UNKNOWN;
 
     if (ui_ctx == NULL) {
-        apdu_response_code = APDU_RESPONSE_CONDITION_NOT_SATISFIED;
-        return false;
+        return APDU_RESPONSE_CONDITION_NOT_SATISFIED;
     }
 
     // Key
     if ((key = get_struct_field_keyname(field_ptr, &key_len)) == NULL) {
-        apdu_response_code = APDU_RESPONSE_CONDITION_NOT_SATISFIED;
-        return false;
+        return APDU_RESPONSE_CONDITION_NOT_SATISFIED;
     }
 
     if (ui_712_field_shown() && !(ui_ctx->field_flags & UI_712_FIELD_NAME_PROVIDED)) {
@@ -414,13 +407,15 @@ bool ui_712_new_field(const void *const field_ptr, const uint8_t *const data, ui
             ui_712_format_str(data, length);
             break;
         case TYPE_SOL_ADDRESS:
-            if (ui_712_format_addr(data, length) == false) {
-                return false;
+            sw = ui_712_format_addr(data, length);
+            if (sw != APDU_RESPONSE_OK) {
+                return sw;
             }
             break;
         case TYPE_SOL_BOOL:
-            if (ui_712_format_bool(data, length) == false) {
-                return false;
+            sw = ui_712_format_bool(data, length);
+            if (sw != APDU_RESPONSE_OK) {
+                return sw;
             }
             break;
         case TYPE_SOL_BYTES_FIX:
@@ -428,8 +423,9 @@ bool ui_712_new_field(const void *const field_ptr, const uint8_t *const data, ui
             ui_712_format_bytes(data, length);
             break;
         case TYPE_SOL_INT:
-            if (ui_712_format_int(data, length, field_ptr) == false) {
-                return false;
+            sw = ui_712_format_int(data, length, field_ptr);
+            if (sw != APDU_RESPONSE_OK) {
+                return sw;
             }
             break;
         case TYPE_SOL_UINT:
@@ -437,44 +433,44 @@ bool ui_712_new_field(const void *const field_ptr, const uint8_t *const data, ui
             break;
         default:
             PRINTF("Unhandled type\n");
-            return false;
+            return APDU_RESPONSE_INVALID_DATA;
     }
 
     // Check if this field is supposed to be displayed
     if (ui_712_field_shown()) {
         ui_712_redraw_generic_step();
     }
-    return true;
+    return APDU_RESPONSE_OK;
 }
 
 /**
  * Used to signal that we are done with reviewing the structs and we can now have
  * the option to approve or reject the signature
  */
-void ui_712_end_sign(void) {
+uint32_t ui_712_end_sign(void) {
     if (ui_ctx == NULL) {
-        apdu_response_code = APDU_RESPONSE_CONDITION_NOT_SATISFIED;
-        return;
+        return APDU_RESPONSE_CONDITION_NOT_SATISFIED;
     }
     ui_ctx->end_reached = true;
 
     if (N_storage.verbose_eip712 || (ui_ctx->filtering_mode == EIP712_FILTERING_FULL)) {
         ui_712_switch_to_sign();
     }
+    return APDU_RESPONSE_OK;
 }
 
 /**
  * Initializes the UI context structure in memory
  */
-bool ui_712_init(void) {
+uint32_t ui_712_init(void) {
     if ((ui_ctx = MEM_ALLOC_AND_ALIGN_TYPE(*ui_ctx))) {
         ui_ctx->shown = false;
         ui_ctx->end_reached = false;
         ui_ctx->filtering_mode = EIP712_FILTERING_BASIC;
     } else {
-        apdu_response_code = APDU_RESPONSE_INSUFFICIENT_MEMORY;
+        return APDU_RESPONSE_INSUFFICIENT_MEMORY;
     }
-    return ui_ctx != NULL;
+    return APDU_RESPONSE_OK;
 }
 
 /**

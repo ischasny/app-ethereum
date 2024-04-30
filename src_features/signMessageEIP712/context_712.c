@@ -22,34 +22,38 @@ s_eip712_context *eip712_context = NULL;
  *
  * @return a boolean indicating if the initialization was successful or not
  */
-bool eip712_context_init(void) {
+uint32_t eip712_context_init(void) {
+    uint32_t sw = APDU_RESPONSE_UNKNOWN;
     // init global variables
     mem_init();
 
     if ((eip712_context = MEM_ALLOC_AND_ALIGN_TYPE(*eip712_context)) == NULL) {
-        apdu_response_code = APDU_RESPONSE_INSUFFICIENT_MEMORY;
-        return false;
+        return APDU_RESPONSE_INSUFFICIENT_MEMORY;
     }
 
-    if (sol_typenames_init() == false) {
-        return false;
+    sw = sol_typenames_init();
+    if (sw != APDU_RESPONSE_OK) {
+        return sw;
     }
 
-    if (path_init() == false) {
-        return false;
+    sw = path_init();
+    if (sw != APDU_RESPONSE_OK) {
+        return sw;
     }
 
-    if (field_hash_init() == false) {
-        return false;
+    sw = field_hash_init();
+    if (sw != APDU_RESPONSE_OK) {
+        return sw;
     }
 
-    if (ui_712_init() == false) {
-        return false;
+    sw = ui_712_init();
+    if (sw != APDU_RESPONSE_OK) {
+        return sw;
     }
 
-    if (typed_data_init() == false)  // this needs to be initialized last !
-    {
-        return false;
+    sw = typed_data_init();  // this needs to be initialized last !
+    if (sw != APDU_RESPONSE_OK) {
+        return sw;
     }
 
     // Since they are optional, they might not be provided by the JSON data
@@ -58,7 +62,7 @@ bool eip712_context_init(void) {
 
     struct_state = NOT_INITIALIZED;
 
-    return true;
+    return APDU_RESPONSE_OK;
 }
 
 /**

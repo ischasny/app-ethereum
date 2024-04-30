@@ -16,7 +16,7 @@
  *
  * @param[in] hash_ctx the hashing context
  */
-static void hash_filtering_path(cx_hash_t *const hash_ctx) {
+static uint32_t hash_filtering_path(cx_hash_t *const hash_ctx) {
     const void *field_ptr;
     const char *key;
     uint8_t key_len;
@@ -26,22 +26,25 @@ static void hash_filtering_path(cx_hash_t *const hash_ctx) {
             hash_byte('.', hash_ctx);
         }
         if ((field_ptr = path_get_nth_field(i + 1)) != NULL) {
-            if ((key = get_struct_field_keyname(field_ptr, &key_len)) != NULL) {
-                // field name
-                hash_nbytes((uint8_t *) key, key_len, hash_ctx);
+            key = get_struct_field_keyname(field_ptr, &key_len);
+            if (!key) {
+                return APDU_RESPONSE_CONDITION_NOT_SATISFIED;
+            }
+            // field name
+            hash_nbytes((uint8_t *) key, key_len, hash_ctx);
 
-                // array levels
-                if (struct_field_is_array(field_ptr)) {
-                    uint8_t lvl_count;
+            // array levels
+            if (struct_field_is_array(field_ptr)) {
+                uint8_t lvl_count;
 
-                    get_struct_field_array_lvls_array(field_ptr, &lvl_count);
-                    for (int j = 0; j < lvl_count; ++j) {
-                        hash_nbytes((uint8_t *) ".[]", 3, hash_ctx);
-                    }
+                get_struct_field_array_lvls_array(field_ptr, &lvl_count);
+                for (int j = 0; j < lvl_count; ++j) {
+                    hash_nbytes((uint8_t *) ".[]", 3, hash_ctx);
                 }
             }
         }
     }
+    return APDU_RESPONSE_OK;
 }
 
 /**
@@ -54,11 +57,12 @@ static void hash_filtering_path(cx_hash_t *const hash_ctx) {
  * @param[in] type the type of filtering
  * @return whether the signature verification worked or not
  */
-static bool verify_filtering_signature(uint8_t dname_length,
-                                       const char *const dname,
-                                       uint8_t sig_length,
-                                       const uint8_t *const sig,
-                                       e_filtering_type type) {
+static uint32_t verify_filtering_signature(uint8_t dname_length,
+                                           const char *const dname,
+                                           uint8_t sig_length,
+                                           const uint8_t *const sig,
+                                           e_filtering_type type) {
+    uint32_t sw = APDU_RESPONSE_UNKNOWN;
     uint8_t hash[INT256_LENGTH];
     cx_ecfp_public_key_t verifying_key;
     cx_sha256_t hash_ctx;
@@ -76,9 +80,8 @@ static bool verify_filtering_signature(uint8_t dname_length,
             hash_byte(FILTERING_MAGIC_CONTRACT_NAME, (cx_hash_t *) &hash_ctx);
             break;
         default:
-            apdu_response_code = APDU_RESPONSE_INVALID_DATA;
             PRINTF("Invalid filtering type when verifying signature!\n");
-            return false;
+            return APDU_RESPONSE_INVALID_DATA;
     }
 
     // Chain ID
@@ -96,7 +99,10 @@ static bool verify_filtering_signature(uint8_t dname_length,
                 (cx_hash_t *) &hash_ctx);
 
     if (type == FILTERING_SHOW_FIELD) {
-        hash_filtering_path((cx_hash_t *) &hash_ctx);
+        sw = hash_filtering_path((cx_hash_t *) &hash_ctx);
+        if (sw != APDU_RESPONSE_OK) {
+            return sw;
+        }
     } else  // FILTERING_PROVIDE_MESSAGE_INFO
     {
         hash_byte(ui_712_remaining_filters(), (cx_hash_t *) &hash_ctx);
@@ -115,13 +121,12 @@ static bool verify_filtering_signature(uint8_t dname_length,
     if (!cx_ecdsa_verify_no_throw(&verifying_key, hash, sizeof(hash), sig, sig_length)) {
 #ifndef HAVE_BYPASS_SIGNATURES
         PRINTF("Invalid EIP-712 filtering signature\n");
-        apdu_response_code = APDU_RESPONSE_INVALID_DATA;
-        return false;
+        return APDU_RESPONSE_INVALID_DATA;
 #endif
     }
-    return true;
+    error = APDU_RESPONSE_OK;
 end:
-    return false;
+    return error;
 }
 
 /**
@@ -132,8 +137,10 @@ end:
  * @param[in] type the type of filtering
  * @return if everything went well or not
  */
-bool provide_filtering_info(const uint8_t *const payload, uint8_t length, e_filtering_type type) {
-    bool ret = false;
+uint32_t provide_filtering_info(const uint8_t *const payload,
+                                uint8_t length,
+                                e_filtering_type type) {
+    uint32_t sw = APDU_RESPONSE_UNKNOWN;
     uint8_t dname_len;
     const char *dname;
     uint8_t sig_len;
@@ -142,14 +149,12 @@ bool provide_filtering_info(const uint8_t *const payload, uint8_t length, e_filt
 
     if (type == FILTERING_PROVIDE_MESSAGE_INFO) {
         if (path_get_root_type() != ROOT_DOMAIN) {
-            apdu_response_code = APDU_RESPONSE_CONDITION_NOT_SATISFIED;
-            return false;
+            return APDU_RESPONSE_CONDITION_NOT_SATISFIED;
         }
     } else  // FILTERING_SHOW_FIELD
     {
         if (path_get_root_type() != ROOT_MESSAGE) {
-            apdu_response_code = APDU_RESPONSE_CONDITION_NOT_SATISFIED;
-            return false;
+            return APDU_RESPONSE_CONDITION_NOT_SATISFIED;
         }
     }
     if (length > 0) {
@@ -164,7 +169,8 @@ bool provide_filtering_info(const uint8_t *const payload, uint8_t length, e_filt
             sig = &payload[offset];
             offset += sig_len;
             if ((sig_len > 0) && (offset == length)) {
-                if ((ret = verify_filtering_signature(dname_len, dname, sig_len, sig, type))) {
+                sw = verify_filtering_signature(dname_len, dname, sig_len, sig, type);
+                if (sw == APDU_RESPONSE_OK) {
                     if (type == FILTERING_PROVIDE_MESSAGE_INFO) {
                         if (!N_storage.verbose_eip712) {
                             ui_712_set_title("Contract", 8);
@@ -183,7 +189,7 @@ bool provide_filtering_info(const uint8_t *const payload, uint8_t length, e_filt
             }
         }
     }
-    return ret;
+    return APDU_RESPONSE_OK;
 }
 
 #endif  // HAVE_EIP712_FULL_SUPPORT

@@ -179,20 +179,20 @@ static void feed_last_hash_depth(const uint8_t *const hash) {
  * @param[in] init if the hashing context should be initialized
  * @return whether the memory allocation of the hashing context was successful
  */
-static bool push_new_hash_depth(bool init) {
+static uint32_t push_new_hash_depth(bool init) {
     cx_sha3_t *hash_ctx;
     cx_err_t error = CX_INTERNAL_ERROR;
 
     // allocate new hash context
     if ((hash_ctx = MEM_ALLOC_AND_ALIGN_TYPE(*hash_ctx)) == NULL) {
-        return false;
+        return APDU_RESPONSE_INSUFFICIENT_MEMORY;
     }
     if (init) {
         CX_CHECK(cx_keccak_init_no_throw(hash_ctx, 256));
     }
-    return true;
+    return APDU_RESPONSE_OK;
 end:
-    return false;
+    return error;
 }
 
 /**
@@ -240,23 +240,21 @@ static bool path_depth_list_pop(void) {
  * @param[in] the number of elements contained in that depth
  * @return whether the push was successful
  */
-static bool array_depth_list_push(uint8_t path_idx, uint8_t size) {
+static uint32_t array_depth_list_push(uint8_t path_idx, uint8_t size) {
     s_array_depth *arr;
 
     if (path_struct == NULL) {
-        apdu_response_code = APDU_RESPONSE_CONDITION_NOT_SATISFIED;
-        return false;
+        return APDU_RESPONSE_CONDITION_NOT_SATISFIED;
     }
     if (path_struct->array_depth_count == MAX_ARRAY_DEPTH) {
-        apdu_response_code = APDU_RESPONSE_CONDITION_NOT_SATISFIED;
-        return false;
+        return APDU_RESPONSE_CONDITION_NOT_SATISFIED;
     }
 
     arr = &path_struct->array_depths[path_struct->array_depth_count];
     arr->path_index = path_idx;
     arr->size = size;
     path_struct->array_depth_count += 1;
-    return true;
+    return APDU_RESPONSE_OK;
 }
 
 /**
@@ -287,35 +285,38 @@ static bool array_depth_list_pop(void) {
  *
  * @return whether the path update worked or not
  */
-static bool path_update(void) {
+static uint32_t path_update(void) {
     uint8_t fields_count;
     const void *struct_ptr;
     const void *field_ptr;
     const char *typename;
     uint8_t typename_len;
     uint8_t hash[KECCAK256_HASH_BYTESIZE];
+    uint32_t sw = APDU_RESPONSE_UNKNOWN;
 
     if (path_struct == NULL) {
-        return false;
+        return APDU_RESPONSE_INVALID_DATA;
     }
     if ((field_ptr = get_field(NULL)) == NULL) {
-        return false;
+        return APDU_RESPONSE_INVALID_DATA;
     }
     while (struct_field_type(field_ptr) == TYPE_CUSTOM) {
         typename = get_struct_field_typename(field_ptr, &typename_len);
         if ((struct_ptr = get_structn(typename, typename_len)) == NULL) {
-            return false;
+            return APDU_RESPONSE_CONDITION_NOT_SATISFIED;
         }
         if ((field_ptr = get_struct_fields_array(struct_ptr, &fields_count)) == NULL) {
-            return false;
+            return APDU_RESPONSE_CONDITION_NOT_SATISFIED;
         }
 
-        if (push_new_hash_depth(true) == false) {
-            return false;
+        sw = push_new_hash_depth(true);
+        if (sw != APDU_RESPONSE_OK) {
+            return sw;
         }
         // get the struct typehash
-        if (type_hash(typename, typename_len, hash) == false) {
-            return false;
+        sw = type_hash(typename, typename_len, hash);
+        if (sw != APDU_RESPONSE_OK) {
+            return sw;
         }
         feed_last_hash_depth(hash);
 
@@ -325,7 +326,7 @@ static bool path_update(void) {
         // ui_712_queue_struct_to_review();
         path_depth_list_push();
     }
-    return true;
+    return APDU_RESPONSE_OK;
 }
 
 /**
@@ -335,15 +336,18 @@ static bool path_update(void) {
  * @param[in] name_length the root struct name length
  * @return boolean indicating if it was successful or not
  */
-bool path_set_root(const char *const struct_name, uint8_t name_length) {
+uint32_t path_set_root(const char *const struct_name, uint8_t name_length) {
+    uint32_t sw = APDU_RESPONSE_UNKNOWN;
     uint8_t hash[KECCAK256_HASH_BYTESIZE];
 
     if (path_struct == NULL) {
-        apdu_response_code = APDU_RESPONSE_INVALID_DATA;
-        return false;
+        return APDU_RESPONSE_INVALID_DATA;
     }
 
     path_struct->root_struct = get_structn(struct_name, name_length);
+    if (!path_struct->root_struct) {
+        return APDU_RESPONSE_CONDITION_NOT_SATISFIED;
+    }
 
     if (path_struct->root_struct == NULL) {
         PRINTF("Struct name not found (");
@@ -351,18 +355,18 @@ bool path_set_root(const char *const struct_name, uint8_t name_length) {
             PRINTF("%c", struct_name[i]);
         }
         PRINTF(")!\n");
-        apdu_response_code = APDU_RESPONSE_INVALID_DATA;
-        return false;
+        return APDU_RESPONSE_INVALID_DATA;
     }
 
-    if (push_new_hash_depth(true) == false) {
-        return false;
+    sw = push_new_hash_depth(true);
+    if (sw != APDU_RESPONSE_OK) {
+        return sw;
     }
-    if (type_hash(struct_name, name_length, hash) == false) {
-        return false;
+    sw = type_hash(struct_name, name_length, hash);
+    if (sw != APDU_RESPONSE_OK) {
+        return sw;
     }
     feed_last_hash_depth(hash);
-    //
 
     // init depth, at 0 : empty path
     path_struct->depth_count = 0;
@@ -381,8 +385,8 @@ bool path_set_root(const char *const struct_name, uint8_t name_length) {
     struct_state = DEFINED;
 
     // because the first field could be a struct type
-    path_update();
-    return true;
+    sw = path_update();
+    return sw;
 }
 
 /**
@@ -394,10 +398,10 @@ bool path_set_root(const char *const struct_name, uint8_t name_length) {
  * @param[in] size requested array depth size
  * @return whether the checks and add were successful or not
  */
-static bool check_and_add_array_depth(const void *depth,
-                                      uint8_t total_count,
-                                      uint8_t pidx,
-                                      uint8_t size) {
+static uint32_t check_and_add_array_depth(const void *depth,
+                                          uint8_t total_count,
+                                          uint8_t pidx,
+                                          uint8_t size) {
     uint8_t expected_size;
     uint8_t arr_idx;
     e_array_type expected_type;
@@ -406,20 +410,16 @@ static bool check_and_add_array_depth(const void *depth,
     // we skip index 0, since we already have it
     for (uint8_t idx = 1; idx < (arr_idx + 1); ++idx) {
         if ((depth = get_next_struct_field_array_lvl(depth)) == NULL) {
-            return false;
+            return APDU_RESPONSE_CONDITION_NOT_SATISFIED;
         }
     }
     expected_type = struct_field_array_depth(depth, &expected_size);
     if ((expected_type == ARRAY_FIXED_SIZE) && (expected_size != size)) {
-        apdu_response_code = APDU_RESPONSE_INVALID_DATA;
         PRINTF("Unexpected array depth size. (expected %d, got %d)\n", expected_size, size);
-        return false;
+        return APDU_RESPONSE_INVALID_DATA;
     }
     // add it
-    if (!array_depth_list_push(pidx, size)) {
-        return false;
-    }
-    return true;
+    return array_depth_list_push(pidx, size);
 }
 
 /**
@@ -429,7 +429,8 @@ static bool check_and_add_array_depth(const void *depth,
  * @param[in] length length of data
  * @return whether the add was successful or not
  */
-bool path_new_array_depth(const uint8_t *const data, uint8_t length) {
+uint32_t path_new_array_depth(const uint8_t *const data, uint8_t length) {
+    uint32_t sw = APDU_RESPONSE_UNKNOWN;
     const void *field_ptr = NULL;
     const void *depth = NULL;
     uint8_t depth_count;
@@ -441,29 +442,27 @@ bool path_new_array_depth(const uint8_t *const data, uint8_t length) {
     cx_err_t error = CX_INTERNAL_ERROR;
 
     if (path_struct == NULL) {
-        apdu_response_code = APDU_RESPONSE_CONDITION_NOT_SATISFIED;
-        return false;
-    } else if (length != 1) {
-        apdu_response_code = APDU_RESPONSE_INVALID_DATA;
-        return false;
+        return APDU_RESPONSE_CONDITION_NOT_SATISFIED;
+    }
+    if (length != 1) {
+        return APDU_RESPONSE_INVALID_DATA;
     }
 
     array_size = *data;
     array_depth_count_bak = path_struct->array_depth_count;
     for (pidx = 0; pidx < path_struct->depth_count; ++pidx) {
         if ((field_ptr = get_nth_field(NULL, pidx + 1)) == NULL) {
-            apdu_response_code = APDU_RESPONSE_CONDITION_NOT_SATISFIED;
-            return false;
+            return APDU_RESPONSE_CONDITION_NOT_SATISFIED;
         }
         if (struct_field_is_array(field_ptr)) {
             if ((depth = get_struct_field_array_lvls_array(field_ptr, &depth_count)) == NULL) {
-                apdu_response_code = APDU_RESPONSE_CONDITION_NOT_SATISFIED;
-                return false;
+                return APDU_RESPONSE_CONDITION_NOT_SATISFIED;
             }
             total_count += depth_count;
             if (total_count > path_struct->array_depth_count) {
-                if (!check_and_add_array_depth(depth, total_count, pidx, array_size)) {
-                    return false;
+                sw = check_and_add_array_depth(depth, total_count, pidx, array_size);
+                if (sw != APDU_RESPONSE_OK) {
+                    return sw;
                 }
                 break;
             }
@@ -471,13 +470,13 @@ bool path_new_array_depth(const uint8_t *const data, uint8_t length) {
     }
 
     if (pidx == path_struct->depth_count) {
-        apdu_response_code = APDU_RESPONSE_INVALID_DATA;
         PRINTF("Did not find a matching array type.\n");
-        return false;
+        return APDU_RESPONSE_INVALID_DATA;
     }
     is_custom = struct_field_type(field_ptr) == TYPE_CUSTOM;
-    if (push_new_hash_depth(!is_custom) == false) {
-        return false;
+    sw = push_new_hash_depth(!is_custom);
+    if (sw != APDU_RESPONSE_OK) {
+        return sw;
     }
     if (is_custom) {
         cx_sha3_t *hash_ctx = get_last_hash_ctx();
@@ -496,9 +495,9 @@ bool path_new_array_depth(const uint8_t *const data, uint8_t length) {
         } while (path_struct->array_depth_count != array_depth_count_bak);
     }
 
-    return true;
+    error = APDU_RESPONSE_OK;
 end:
-    return false;
+    return error;
 }
 
 /**
@@ -618,15 +617,14 @@ uint8_t path_get_depth_count(void) {
  *
  * @return whether the memory allocation were successful.
  */
-bool path_init(void) {
+uint32_t path_init(void) {
     if (path_struct == NULL) {
         if ((path_struct = MEM_ALLOC_AND_ALIGN_TYPE(*path_struct)) == NULL) {
-            apdu_response_code = APDU_RESPONSE_INSUFFICIENT_MEMORY;
-        } else {
-            path_struct->depth_count = 0;
+            return APDU_RESPONSE_INSUFFICIENT_MEMORY;
         }
+        path_struct->depth_count = 0;
     }
-    return path_struct != NULL;
+    return APDU_RESPONSE_OK;
 }
 
 /**

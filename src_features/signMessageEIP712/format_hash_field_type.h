@@ -5,7 +5,7 @@
 
 #include "cx.h"
 
-bool format_hash_field_type(const void *const field_ptr, cx_hash_t *hash_ctx);
+uint32_t format_hash_field_type(const void *const field_ptr, cx_hash_t *hash_ctx);
 
 #endif  // HAVE_EIP712_FULL_SUPPORT
 
