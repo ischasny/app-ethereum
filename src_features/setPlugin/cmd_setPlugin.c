@@ -8,7 +8,11 @@
 #include "common_ui.h"
 #include "os_io_seproxyhal.h"
 #include "network.h"
+#ifdef HAVE_LEDGER_PKI
+#include "os_pki.h"
+#else
 #include "public_keys.h"
+#endif
 
 // Supported internal plugins
 #define ERC721_STR  "ERC721"
@@ -82,7 +86,9 @@ void handleSetPlugin(uint8_t p1,
     UNUSED(flags);
     PRINTF("Handling set Plugin\n");
     uint8_t hash[INT256_LENGTH] = {0};
+#ifndef HAVE_LEDGER_PKI
     cx_ecfp_public_key_t pluginKey = {0};
+#endif
     tokenContext_t *tokenContext = &dataContext.tokenContext;
 
     size_t offset = 0;
@@ -166,25 +172,18 @@ void handleSetPlugin(uint8_t p1,
     offset += CHAIN_ID_SIZE;
 
     enum KeyId keyId = workBuffer[offset];
-    uint8_t const *rawKey;
-    uint8_t rawKeyLen;
 
-    PRINTF("KeyID: %d\n", keyId);
-    switch (keyId) {
 #ifdef HAVE_NFT_STAGING_KEY
-        case TEST_PLUGIN_KEY:
+    enum KeyId valid_keyId = TEST_PLUGIN_KEY;
+#else
+    enum KeyId valid_keyId = PROD_PLUGIN_KEY;
 #endif
-        case PROD_PLUGIN_KEY:
-            rawKey = LEDGER_NFT_SELECTOR_PUBLIC_KEY;
-            rawKeyLen = sizeof(LEDGER_NFT_SELECTOR_PUBLIC_KEY);
-            break;
-        default:
-            PRINTF("KeyID %d not supported\n", keyId);
-            THROW(0x6A80);
-            break;
+    if (keyId != valid_keyId) {
+        PRINTF("KeyID %d not supported\n", keyId);
+        THROW(APDU_RESPONSE_INVALID_DATA);
     }
+    PRINTF("KeyID: %d\n", keyId);
 
-    PRINTF("RawKey: %.*H\n", rawKeyLen, rawKey);
     offset += KEY_ID_SIZE;
 
     uint8_t algorithmId = workBuffer[offset];
@@ -219,12 +218,19 @@ void handleSetPlugin(uint8_t p1,
         THROW(0x6a80);
     }
 
+#ifdef HAVE_LEDGER_PKI
+    if (!os_pki_verify(hash, sizeof(hash), (uint8_t *) (workBuffer + offset), signatureLen)) {
+#else
+    uint8_t const *rawKey = LEDGER_NFT_SELECTOR_PUBLIC_KEY;
+    uint8_t rawKeyLen = sizeof(LEDGER_NFT_SELECTOR_PUBLIC_KEY);
+    PRINTF("RawKey: %.*H\n", rawKeyLen, rawKey);
     CX_ASSERT(cx_ecfp_init_public_key_no_throw(CX_CURVE_256K1, rawKey, rawKeyLen, &pluginKey));
     if (!cx_ecdsa_verify_no_throw(&pluginKey,
                                   hash,
                                   sizeof(hash),
                                   (unsigned char *) (workBuffer + offset),
                                   signatureLen)) {
+#endif
 #ifndef HAVE_BYPASS_SIGNATURES
         PRINTF("Invalid NFT signature\n");
         THROW(0x6A80);

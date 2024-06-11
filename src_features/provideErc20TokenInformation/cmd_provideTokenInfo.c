@@ -1,10 +1,14 @@
 #include "shared_context.h"
 #include "apdu_constants.h"
-#include "public_keys.h"
 #include "common_ui.h"
 #include "os_io_seproxyhal.h"
 #include "network.h"
 #include "manage_asset_info.h"
+#ifdef HAVE_LEDGER_PKI
+#include "os_pki.h"
+#else
+#include "public_keys.h"
+#endif
 
 void handleProvideErc20TokenInformation(uint8_t p1,
                                         uint8_t p2,
@@ -20,8 +24,9 @@ void handleProvideErc20TokenInformation(uint8_t p1,
     uint8_t tickerLength;
     uint64_t chain_id;
     uint8_t hash[INT256_LENGTH];
+#ifndef HAVE_LEDGER_PKI
     cx_ecfp_public_key_t tokenKey;
-
+#endif
     tokenDefinition_t *token = &get_current_asset_info()->token;
 
     PRINTF("Provisioning currentAssetIndex %d\n", tmpCtx.transactionContext.currentAssetIndex);
@@ -58,11 +63,15 @@ void handleProvideErc20TokenInformation(uint8_t p1,
     offset += 4;
     dataLength -= 4;
 
+#ifdef HAVE_LEDGER_PKI
+    if (!os_pki_verify(hash, sizeof(hash), (uint8_t *) (workBuffer + offset), dataLength)) {
+#else
     CX_ASSERT(cx_ecfp_init_public_key_no_throw(CX_CURVE_256K1,
                                                LEDGER_SIGNATURE_PUBLIC_KEY,
                                                sizeof(LEDGER_SIGNATURE_PUBLIC_KEY),
                                                &tokenKey));
     if (!cx_ecdsa_verify_no_throw(&tokenKey, hash, 32, workBuffer + offset, dataLength)) {
+#endif
 #ifndef HAVE_BYPASS_SIGNATURES
         PRINTF("Invalid token signature\n");
         THROW(0x6A80);

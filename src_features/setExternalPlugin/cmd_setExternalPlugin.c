@@ -1,11 +1,15 @@
 #include "shared_context.h"
 #include "apdu_constants.h"
-#include "public_keys.h"
 #include "eth_plugin_interface.h"
 #include "eth_plugin_internal.h"
 #include "plugin_utils.h"
 #include "common_ui.h"
 #include "os_io_seproxyhal.h"
+#ifdef HAVE_LEDGER_PKI
+#include "os_pki.h"
+#else
+#include "public_keys.h"
+#endif
 
 void handleSetExternalPlugin(uint8_t p1,
                              uint8_t p2,
@@ -18,7 +22,9 @@ void handleSetExternalPlugin(uint8_t p1,
     UNUSED(flags);
     PRINTF("Handling set Plugin\n");
     uint8_t hash[INT256_LENGTH];
+#ifndef HAVE_LEDGER_PKI
     cx_ecfp_public_key_t tokenKey;
+#endif
     uint8_t pluginNameLength = *workBuffer;
     PRINTF("plugin Name Length: %d\n", pluginNameLength);
     const size_t payload_size = 1 + pluginNameLength + ADDRESS_LENGTH + SELECTOR_SIZE;
@@ -37,6 +43,12 @@ void handleSetExternalPlugin(uint8_t p1,
 
     // check Ledger's signature over the payload
     cx_hash_sha256(workBuffer, payload_size, hash, sizeof(hash));
+#ifdef HAVE_LEDGER_PKI
+    if (!os_pki_verify(hash,
+                       sizeof(hash),
+                       (uint8_t *) (workBuffer + payload_size),
+                       dataLength - payload_size)) {
+#else
     CX_ASSERT(cx_ecfp_init_public_key_no_throw(CX_CURVE_256K1,
                                                LEDGER_SIGNATURE_PUBLIC_KEY,
                                                sizeof(LEDGER_SIGNATURE_PUBLIC_KEY),
@@ -46,6 +58,7 @@ void handleSetExternalPlugin(uint8_t p1,
                                   sizeof(hash),
                                   workBuffer + payload_size,
                                   dataLength - payload_size)) {
+#endif
 #ifndef HAVE_BYPASS_SIGNATURES
         PRINTF("Invalid plugin signature %.*H\n",
                dataLength - payload_size,
